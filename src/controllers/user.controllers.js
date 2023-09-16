@@ -3,6 +3,7 @@ const User = require('../models/User');
 const bcrypt = require('bcrypt');
 const sendEmail = require('../utils/sendEmail');
 const EmailCode = require('../models/EmailCode');
+const jwt = require('jsonwebtoken');
 
 const getAll = catchError(async (req, res) => {
   const results = await User.findAll();
@@ -57,6 +58,9 @@ const remove = catchError(async (req, res) => {
 
 const update = catchError(async (req, res) => {
   const { id } = req.params;
+  delete req.body.password;
+  delete req.body.email;
+  delete req.body.isVerified;
   const result = await User.update(
     req.body,
     { where: { id }, returning: true }
@@ -70,12 +74,33 @@ const verifyEmail = catchError(async (req, res) => {
   const emailCode = await EmailCode.findOne({ where: { code } });
   if (!emailCode) return res.status(401).json({ message: "Invalid code" });
   const user = await User.update(
-    { isVerified: true }, 
+    { isVerified: true },
     { where: { id: emailCode.userId }, returning: true }
   );
   await emailCode.destroy();
   return res.json(user);
 });
+
+const login = catchError(async (req, res) => {
+  const { email, password } = req.body;
+  const user = await User.findOne({ where: { email } });
+  if (!user) return res.status(401).json({ message: "Invalid credentials" });
+  const isValid = await bcrypt.compare(password, user.password);
+  if (!isValid) return res.status(401).json({ message: "Invalid credentials" });
+  if (!user.isVerified)
+    return res.status(401).json({ message: "User must be verified" });
+  const token = jwt.sign(
+    { user },
+    process.env.TOKEN_SECRET,
+    { expiresIn: "1d" },
+  );
+  return res.json({ user, token });
+});
+
+const getLoggedUser = catchError(async (req, res) => {
+  const user = req.user;
+  return res.json(user);
+})
 
 module.exports = {
   getAll,
@@ -83,5 +108,7 @@ module.exports = {
   getOne,
   remove,
   update,
-  verifyEmail
+  verifyEmail,
+  login,
+  getLoggedUser,
 }
